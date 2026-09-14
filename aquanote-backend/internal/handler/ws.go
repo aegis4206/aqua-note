@@ -16,7 +16,7 @@ var (
 		CheckOrigin: func(r *http.Request) bool { return true },
 	}
 	clients      = make(map[*websocket.Conn]bool)
-	clientsMutex sync.Mutex
+	clientsMutex sync.RWMutex
 )
 
 var (
@@ -25,24 +25,43 @@ var (
 )
 
 func Broadcast(payload []byte) {
-	// 解析MQTT Payload 並更新全域最新數據
 	var data models.SensorData
 	if err := json.Unmarshal(payload, &data); err == nil {
 		latestMutex.Lock()
 		latestData = &data
 		latestMutex.Unlock()
+	} else {
+		log.Printf("[MQTT] JSON unmarshal error: %v", err)
 	}
+
 	log.Printf("[MQTT] Received data: %s", string(payload))
 
+	clientsMutex.RLock()
+	if len(clients) == 0 {
+		clientsMutex.RUnlock()
+		return
+	}
+	targets := make([]*websocket.Conn, 0, len(clients))
 	for conn := range clients {
-		err := conn.WriteMessage(websocket.TextMessage, payload)
-		if err != nil {
+		targets = append(targets, conn)
+	}
+	clientsMutex.RUnlock()
+
+	var deadConns []*websocket.Conn
+	for _, conn := range targets {
+		if err := conn.WriteMessage(websocket.TextMessage, payload); err != nil {
 			log.Printf("[WS] Write error: %v", err)
-			clientsMutex.Lock()
 			conn.Close()
-			delete(clients, conn)
-			clientsMutex.Unlock()
+			deadConns = append(deadConns, conn)
 		}
+	}
+
+	if len(deadConns) > 0 {
+		clientsMutex.Lock()
+		for _, conn := range deadConns {
+			delete(clients, conn)
+		}
+		clientsMutex.Unlock()
 	}
 }
 

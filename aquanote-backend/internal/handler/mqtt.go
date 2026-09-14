@@ -23,7 +23,6 @@ func (h *SensorHook) Provides(b byte) bool {
 }
 
 func (h *SensorHook) OnPublish(cl *mqtt.Client, pk packets.Packet) (packets.Packet, error) {
-	// ws Broadcast
 	Broadcast(pk.Payload)
 	return pk, nil
 }
@@ -33,7 +32,28 @@ func StartMQTTBroker() {
 		InlineClient: true,
 	})
 
-	_ = broker.AddHook(new(auth.AllowHook), nil)
+	if err := broker.AddHook(new(auth.Hook), &auth.Options{
+		Ledger: &auth.Ledger{
+			Auth: auth.AuthRules{
+				{
+					Username: auth.RString("iot-test"),
+					Password: auth.RString("iot-test"),
+					Allow:    true,
+				},
+				{Allow: false},
+			},
+			Users: auth.Users{
+				"iot-test": auth.UserRule{
+					Password: auth.RString("iot-test"),
+					ACL: auth.Filters{
+						"#": auth.ReadWrite,
+					},
+				},
+			},
+		},
+	}); err != nil {
+		log.Fatalf("[MQTT Broker] AddHook error: %v", err)
+	}
 
 	tcpListener := listeners.NewTCP(listeners.Config{
 		ID:      "t1",
