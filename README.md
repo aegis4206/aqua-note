@@ -10,7 +10,7 @@ aquanote-backend/
 ├── internal/  
 │   ├── handler/             # HTTP 請求處理（即 Controller）  
 │   │   └── user_handler.go  
-│   ├── service/             # 業務邏輯層  
+│   ├── service/             # 業務邏輯層  小專案併入handler
 │   │   └── user_service.go  
 │   ├── repository/          # 資料存取層（DB 操作）  
 │   │   └── user_repo.go  
