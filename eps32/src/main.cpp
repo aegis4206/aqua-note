@@ -43,7 +43,10 @@ enum class SysStatus
 bool setupWifi(unsigned long timeoutMs = 15000);
 bool tryConnectMQTT();
 void setStatusLED(SysStatus status);
-void readTemperatureAndPublish();
+bool readTemperatureAndPublish();
+
+const unsigned long publishInterval = 300000;
+unsigned long lastPublish = 0UL - publishInterval;
 
 void setup()
 {
@@ -63,11 +66,11 @@ void setup()
     setStatusLED(SysStatus::WIFI_FAIL);
   }
   client.setServer(mqtt_server, mqtt_port);
+  client.setKeepAlive(60); // 設定 MQTT Keep Alive 為 60 秒
 }
 
 void loop()
 {
-  // 檢查 Wi-Fi 連線狀態
   if (WiFi.status() != WL_CONNECTED)
   {
     setStatusLED(SysStatus::WIFI_FAIL);
@@ -79,7 +82,7 @@ void loop()
     }
     setStatusLED(SysStatus::OK);
   }
-  // 檢查 MQTT 連線
+
   if (!client.connected())
   {
     setStatusLED(SysStatus::MQTT_FAIL);
@@ -91,10 +94,18 @@ void loop()
     }
     setStatusLED(SysStatus::OK);
   }
-  // 處理 MQTT 背景任務
+
   client.loop();
 
-  readTemperatureAndPublish();
+  unsigned long now = millis();
+  if (now - lastPublish >= publishInterval)
+  {
+    if (readTemperatureAndPublish())
+    {
+      Serial.println("Temperature published successfully");
+      lastPublish = now;
+    }
+  }
 
   delay(5000);
 }
@@ -110,10 +121,10 @@ void setStatusLED(SysStatus status)
     pixels.setPixelColor(0, pixels.Color(0, 255, 0)); // 綠
     break;
   case SysStatus::MQTT_FAIL:
-    pixels.setPixelColor(0, pixels.Color(255, 255, 0)); // 黃
+    pixels.setPixelColor(0, pixels.Color(255, 100, 0)); // 橘
     break;
   case SysStatus::PUBLISH_FAIL:
-    pixels.setPixelColor(0, pixels.Color(255, 100, 0)); // 橘
+    pixels.setPixelColor(0, pixels.Color(255, 255, 0)); // 黃
     break;
   case SysStatus::TEMP_FAIL:
     pixels.setPixelColor(0, pixels.Color(128, 0, 128)); // 紫
@@ -134,6 +145,7 @@ bool setupWifi(unsigned long timeoutMs)
   while (WiFi.status() != WL_CONNECTED && millis() - startAttemptTime < timeoutMs)
   {
     setStatusLED(SysStatus::WIFI_CONNECTING);
+    delay(500);
     setStatusLED(SysStatus::OK);
     delay(500);
     Serial.print(".");
@@ -169,38 +181,36 @@ bool tryConnectMQTT()
 }
 
 // 讀取溫度
-void readTemperatureAndPublish()
+bool readTemperatureAndPublish()
 {
-  // 讀取溫度
   sensors.requestTemperatures();
   float tempC = sensors.getTempCByIndex(0);
 
-  // 確保讀數有效 (-127 代表感測器錯誤或沒接好)
-  if (tempC != DEVICE_DISCONNECTED_C)
-  {
-    setStatusLED(SysStatus::OK);
-
-    // 建立 JSON 物件
-    JsonDocument doc;
-    doc["device_code"] = deviceId;
-    doc["temperature"] = tempC;
-
-    // 將 JSON 轉為字串
-    char jsonBuffer[256];
-    serializeJson(doc, jsonBuffer);
-
-    // 發布 MQTT 訊息
-    Serial.print("Publishing message: ");
-    Serial.println(jsonBuffer);
-    if (!client.publish(mqtt_topic, jsonBuffer))
-    {
-      Serial.println("Error: Failed to publish message");
-      setStatusLED(SysStatus::PUBLISH_FAIL);
-    }
-  }
-  else
+  if (tempC == DEVICE_DISCONNECTED_C)
   {
     Serial.println("Error: Could not read temperature data");
     setStatusLED(SysStatus::TEMP_FAIL);
+    return false;
   }
+
+  setStatusLED(SysStatus::OK);
+
+  JsonDocument doc;
+  doc["device_code"] = deviceId;
+  doc["temperature"] = tempC;
+
+  char jsonBuffer[256];
+  serializeJson(doc, jsonBuffer);
+
+  Serial.print("Publishing message: ");
+  Serial.println(jsonBuffer);
+
+  if (!client.publish(mqtt_topic, jsonBuffer))
+  {
+    Serial.println("Error: Failed to publish message");
+    setStatusLED(SysStatus::PUBLISH_FAIL);
+    return false;
+  }
+
+  return true;
 }

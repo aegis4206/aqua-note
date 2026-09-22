@@ -1,8 +1,7 @@
 package handler
 
 import (
-	models "aquanote-backend/internal/model"
-	"encoding/json"
+	model "aquanote-backend/internal/model"
 	"log"
 	"net/http"
 	"sync"
@@ -20,21 +19,14 @@ var (
 )
 
 var (
-	latestData  *models.SensorData
+	latestData  *model.TemperatureLog
 	latestMutex sync.RWMutex
 )
 
-func Broadcast(payload []byte) {
-	var data models.SensorData
-	if err := json.Unmarshal(payload, &data); err == nil {
-		latestMutex.Lock()
-		latestData = &data
-		latestMutex.Unlock()
-	} else {
-		log.Printf("[MQTT] JSON unmarshal error: %v", err)
-	}
-
-	log.Printf("[MQTT] Received data: %s", string(payload))
+func Broadcast(data model.TemperatureLog) {
+	latestMutex.Lock()
+	latestData = &data
+	latestMutex.Unlock()
 
 	clientsMutex.RLock()
 	if len(clients) == 0 {
@@ -49,7 +41,7 @@ func Broadcast(payload []byte) {
 
 	var deadConns []*websocket.Conn
 	for _, conn := range targets {
-		if err := conn.WriteMessage(websocket.TextMessage, payload); err != nil {
+		if err := conn.WriteJSON(data); err != nil {
 			log.Printf("[WS] Write error: %v", err)
 			conn.Close()
 			deadConns = append(deadConns, conn)
